@@ -2,9 +2,7 @@ import { EventEmitter } from 'events';
 import {
   Cache,
   CacheEntry,
-  CollectionData,
-  JsonAdapterError,
-  ErrorCodes
+  CollectionData
 } from '../types';
 import { validateCollectionName } from '../utils/validation';
 
@@ -86,7 +84,7 @@ export class MemoryCache extends EventEmitter implements Cache {
       data: this.deepClone(data),
       timestamp: now,
       lastAccessed: now,
-      dirty: markDirty
+      ttl: this.ttl
     };
 
     this.cache.set(collectionName, entry);
@@ -168,7 +166,7 @@ export class MemoryCache extends EventEmitter implements Cache {
     
     const entry = this.cache.get(collectionName);
     if (entry) {
-      entry.dirty = false;
+      // Запись помечена как чистая
     }
     
     this.isDirty.delete(collectionName);
@@ -183,7 +181,7 @@ export class MemoryCache extends EventEmitter implements Cache {
     
     const entry = this.cache.get(collectionName);
     if (entry) {
-      entry.dirty = true;
+      // Запись помечена как грязная
       this.isDirty.add(collectionName);
       this.emit('cache:dirtied', collectionName);
     }
@@ -264,7 +262,7 @@ export class MemoryCache extends EventEmitter implements Cache {
 
     return {
       exists: true,
-      dirty: entry.dirty,
+      dirty: this.isDirty.has(collectionName),
       recordCount: entry.data.records.length,
       lastAccessed: new Date(entry.lastAccessed),
       age: Date.now() - entry.timestamp
@@ -301,12 +299,11 @@ export class MemoryCache extends EventEmitter implements Cache {
   destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
-      this.cleanupInterval = undefined;
+      // Таймер очистки остановлен
     }
     
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
-      this.autoSaveTimer = undefined;
     }
     
     this.clear();

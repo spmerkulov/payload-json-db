@@ -19,7 +19,7 @@ export class QueryProcessor {
     where: Record<string, any>
   ): T | null {
     for (const record of records) {
-      if (this.matchesWhere(record, where)) {
+      if (this.matchesFilter(record, where)) {
         return record;
       }
     }
@@ -36,7 +36,6 @@ export class QueryProcessor {
     validateQueryOptions(options);
 
     let filteredRecords = [...records];
-    let totalDocs = records.length;
 
     // Применяем фильтры
     if (options.where) {
@@ -65,22 +64,13 @@ export class QueryProcessor {
       totalPages: pagination.totalPages,
       hasNextPage: pagination.hasNextPage,
       hasPrevPage: pagination.hasPrevPage,
-      nextPage: pagination.nextPage,
-      prevPage: pagination.prevPage,
+      nextPage: pagination.nextPage ?? null,
+      prevPage: pagination.prevPage ?? null,
       pagingCounter: pagination.pagingCounter
     };
   }
 
-  /**
-   * Поиск одной записи по условиям
-   */
-  static findOne<T extends JsonRecord>(
-    records: T[],
-    where: Record<string, any>
-  ): T | null {
-    const filtered = this.applyFilters(records, where);
-    return filtered.length > 0 ? filtered[0] : null;
-  }
+
 
   /**
    * Поиск записи по ID
@@ -172,7 +162,7 @@ export class QueryProcessor {
           break;
         case '$regex':
           if (typeof recordValue !== 'string') return false;
-          const regex = new RegExp(operatorValue, operators.$options || '');
+          const regex = new RegExp(operatorValue, operators['$options'] || '');
           if (!regex.test(recordValue)) return false;
           break;
         case '$size':
@@ -383,7 +373,7 @@ export class IndexManager {
   /**
    * Обновление индекса при изменении записи
    */
-  updateIndex<T extends JsonRecord>(
+  updateIndex(
     fieldPath: string,
     recordId: string,
     oldValue: any,
@@ -422,7 +412,7 @@ export class IndexManager {
    * Удаление записи из всех индексов
    */
   removeFromIndexes(recordId: string): void {
-    for (const [fieldPath, index] of this.indexes.entries()) {
+    for (const [_fieldPath, index] of this.indexes.entries()) {
       for (const [key, ids] of index.entries()) {
         const filteredIds = ids.filter(id => id !== recordId);
         if (filteredIds.length === 0) {

@@ -1,4 +1,20 @@
-import { DatabaseAdapter, PayloadRequest } from 'payload/types';
+/**
+ * Базовый интерфейс для адаптера базы данных
+ */
+export interface DatabaseAdapter {
+  init(): Promise<void>;
+  connect(): Promise<void>;
+  destroy(): Promise<void>;
+}
+
+/**
+ * Интерфейс для запроса Payload
+ */
+export interface PayloadRequest {
+  user?: any;
+  locale?: string;
+  fallbackLocale?: string;
+}
 
 /**
  * Конфигурация JSON адаптера
@@ -16,6 +32,8 @@ export interface JsonAdapterConfig {
   
   /** Настройки кэширования */
   cache?: {
+    /** Включить кэширование */
+    enabled: boolean;
     /** Время жизни кэша в миллисекундах */
     ttl: number;
     /** Максимальное количество записей в кэше */
@@ -26,6 +44,8 @@ export interface JsonAdapterConfig {
   
   /** Настройки производительности */
   performance?: {
+    /** Включить индексирование для быстрого поиска */
+    enableIndexing: boolean;
     /** Максимальный размер файла в байтах */
     maxFileSize: number;
     /** Включить сжатие JSON */
@@ -84,8 +104,9 @@ export interface QueryResult<T = JsonRecord> {
   totalPages: number;
   hasNextPage: boolean;
   hasPrevPage: boolean;
-  nextPage?: number;
-  prevPage?: number;
+  nextPage?: number | null;
+  prevPage?: number | null;
+  pagingCounter: number;
 }
 
 /**
@@ -95,17 +116,22 @@ export interface CacheEntry<T = any> {
   data: T;
   timestamp: number;
   ttl: number;
+  lastAccessed: number;
 }
 
 /**
  * Интерфейс кэша
  */
 export interface Cache {
-  get<T>(key: string): CacheEntry<T> | undefined;
-  set<T>(key: string, data: T, ttl?: number): void;
-  delete(key: string): boolean;
+  get(collectionName: string): CollectionData | null;
+  set(collectionName: string, data: CollectionData, markDirty?: boolean): void;
+  delete(collectionName: string): boolean;
   clear(): void;
   size(): number;
+  has(collectionName: string): boolean;
+  getDirtyCollections(): string[];
+  markClean(collectionName: string): void;
+  markDirty(collectionName: string): void;
 }
 
 /**
@@ -136,8 +162,14 @@ export interface Encryption {
 export interface AdapterStats {
   collections: number;
   totalRecords: number;
+  totalOperations: number;
+  totalQueryTime: number;
   cacheHitRate: number;
+  cacheHits: number;
+  cacheMisses: number;
   averageQueryTime: number;
+  dataSize: number;
+  lastModified?: Date;
   memoryUsage: {
     cache: number;
     total: number;

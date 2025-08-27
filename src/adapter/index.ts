@@ -1,17 +1,16 @@
 import { EventEmitter } from 'events';
-import { DatabaseAdapter, PayloadRequest } from 'payload/types';
 import {
+  DatabaseAdapter,
+  PayloadRequest,
   JsonAdapterConfig,
   JsonDatabaseAdapter,
   JsonRecord,
   QueryOptions,
   QueryResult,
   AdapterStats,
-  AdapterEvents,
   JsonAdapterError,
   ErrorCodes
 } from '../types';
-import { EventEmitter } from 'events';
 import { FileManager } from '../storage/fileManager';
 import { MemoryCache } from '../storage/memoryCache';
 import { AESEncryption } from '../security/encryption';
@@ -54,8 +53,8 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     this.fileManager = new FileManager(this.config.dataDir);
     this.cache = new MemoryCache(this.config.cache!);
     
-    if (this.config.encryption?.enabled) {
-      this.encryption = new AESEncryption(this.config.encryption);
+    if (this.config.encryption?.key) {
+      this.encryption = new AESEncryption(this.config.encryption.key);
     }
 
     // Настройка событий кэша
@@ -86,7 +85,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
 
       this.emit('adapter:initialized');
     } catch (error) {
-      this.emit('error', error as Error);
+      this.emit('error', error instanceof Error ? error : new Error(String(error)));
       throw new JsonAdapterError(
         'Failed to initialize adapter',
         ErrorCodes.FILE_SYSTEM_ERROR
@@ -108,9 +107,8 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     try {
       // Очищаем таймер автосохранения
       if (this.autoSaveTimer) {
-        clearInterval(this.autoSaveTimer);
-        this.autoSaveTimer = undefined;
-      }
+          clearInterval(this.autoSaveTimer);
+        }
       
       // Финальное сохранение перед уничтожением
       await this.performAutoSave();
@@ -130,7 +128,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   async create<T extends JsonRecord>(
     collection: string,
     data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>,
-    req?: PayloadRequest
+    _req?: PayloadRequest
   ): Promise<T> {
     const startTime = Date.now();
     
@@ -138,7 +136,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
       validateCollectionName(collection);
       validateRecordData(data);
       
-      const record = await this.createOperation(collection, data);
+      const record = await this.createOperation<T>(collection, data as Partial<T>);
       this.updateStats(startTime);
       this.emit('record:created', collection, record.id);
       return record as T;
@@ -154,7 +152,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   async find<T extends JsonRecord>(
     collection: string,
     options: QueryOptions = {},
-    req?: PayloadRequest
+    _req?: PayloadRequest
   ): Promise<QueryResult<T>> {
     const startTime = Date.now();
     
@@ -178,7 +176,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   async findOne<T extends JsonRecord>(
     collection: string,
     idOrWhere: string | Record<string, any>,
-    req?: PayloadRequest
+    _req?: PayloadRequest
   ): Promise<T | null> {
     const startTime = Date.now();
     
@@ -191,7 +189,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
       } else {
         // Поиск по условиям
         const result = await this.findOperation<T>(collection, { where: idOrWhere, limit: 1 });
-        record = result.docs.length > 0 ? result.docs[0] : null;
+        record = result.docs.length > 0 ? (result.docs[0] ?? null) : null;
       }
       
       this.updateStats(startTime);
@@ -209,7 +207,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     collection: string,
     id: string,
     data: Partial<T>,
-    req?: PayloadRequest
+    _req?: PayloadRequest
   ): Promise<T | null> {
     const startTime = Date.now();
     
@@ -232,7 +230,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   async findOneAndDelete<T extends JsonRecord>(
     collection: string,
     id: string,
-    req?: PayloadRequest
+    _req?: PayloadRequest
   ): Promise<T | null> {
     const startTime = Date.now();
     
@@ -252,18 +250,26 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   /**
    * Получение статистики адаптера
    */
-  getStats() {
+  async getStats(): Promise<AdapterStats> {
+    const cacheStats = this.cache.getStats();
     return {
+      collections: await this.fileManager.listCollections().then(cols => cols.length),
+      totalRecords: cacheStats.size,
       totalOperations: this.stats.queryCount,
       totalQueryTime: this.stats.totalQueryTime,
-      cacheHits: this.stats.cacheHits,
-      cacheMisses: this.stats.cacheMisses,
       cacheHitRate: this.stats.queryCount > 0 
         ? this.stats.cacheHits / this.stats.queryCount 
         : 0,
+      cacheHits: this.stats.cacheHits,
+      cacheMisses: this.stats.cacheMisses,
       averageQueryTime: this.stats.queryCount > 0 
         ? this.stats.totalQueryTime / this.stats.queryCount 
-        : 0
+        : 0,
+      dataSize: process.memoryUsage().heapUsed,
+      memoryUsage: {
+        cache: process.memoryUsage().heapUsed,
+        total: process.memoryUsage().rss
+      }
     };
   }
 
@@ -299,7 +305,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
   /**
    * Миграция данных из другого адаптера
    */
-  async migrate(fromAdapter: DatabaseAdapter): Promise<void> {
+  async migrate(_fromAdapter: DatabaseAdapter): Promise<void> {
     throw new JsonAdapterError(
       'Migration not implemented yet',
       ErrorCodes.MIGRATION_ERROR
@@ -375,7 +381,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
 
     // Ищем запись по ID
     const record = collectionData.records.find((r: JsonRecord) => r.id === id);
-    return record as T || null;
+    return (record as T) || null;
   }
 
   private async updateOperation<T extends JsonRecord>(
@@ -475,7 +481,7 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
         'Auto-save failed',
         ErrorCodes.FILE_SYSTEM_ERROR,
         undefined,
-        error as Error
+        error instanceof Error ? error.message : String(error)
       ));
     }
   }

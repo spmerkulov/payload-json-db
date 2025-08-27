@@ -116,7 +116,7 @@ describe('JsonAdapter Caching & Auto-save', () => {
       // Второй поиск - должен быть cache hit
       await testAdapter.findOne<TestRecord>('users', record.id);
 
-      const stats = testAdapter.getStats();
+      const stats = await testAdapter.getStats();
       expect(stats.cacheHits).toBeGreaterThan(0);
       expect(stats.cacheMisses).toBeGreaterThan(0);
     } finally {

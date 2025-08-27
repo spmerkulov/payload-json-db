@@ -112,6 +112,13 @@ export class AESEncryption implements Encryption {
   }
 
   /**
+   * Проверка, включено ли шифрование
+   */
+  isEnabled(): boolean {
+    return true;
+  }
+
+  /**
    * Получение информации о шифровании
    */
   getEncryptionInfo(): {

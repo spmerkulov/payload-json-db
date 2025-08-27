@@ -268,7 +268,7 @@ describe('JsonAdapter', () => {
       await adapter.create<TestRecord>('users', { name: 'Test', email: 'test@example.com' });
       await adapter.find<TestRecord>('users');
 
-      const stats = adapter.getStats();
+      const stats = await adapter.getStats();
       
       expect(stats.totalOperations).toBeGreaterThan(0);
       expect(stats.totalQueryTime).toBeGreaterThanOrEqual(0);
@@ -281,7 +281,7 @@ describe('JsonAdapter', () => {
       
       await adapter.clearCache();
       
-      const stats = adapter.getStats();
+      const stats = await adapter.getStats();
       expect(stats.cacheHits).toBe(0);
       expect(stats.cacheMisses).toBe(0);
     });

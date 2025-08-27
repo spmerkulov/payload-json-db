@@ -4,8 +4,6 @@ import { EventEmitter } from 'events';
 import {
   FileManager as IFileManager,
   CollectionData,
-  CollectionMetadata,
-  JsonRecord,
   JsonAdapterError,
   ErrorCodes
 } from '../types';
@@ -76,8 +74,8 @@ export class FileManager extends EventEmitter implements IFileManager {
       // Преобразуем строковые даты обратно в объекты Date
       data.records = data.records.map(record => ({
         ...record,
-        createdAt: typeof record.createdAt === 'string' ? new Date(record.createdAt) : record.createdAt,
-        updatedAt: typeof record.updatedAt === 'string' ? new Date(record.updatedAt) : record.updatedAt
+        createdAt: typeof record.createdAt === 'string' ? new Date(record.createdAt) : (record.createdAt || new Date()),
+        updatedAt: typeof record.updatedAt === 'string' ? new Date(record.updatedAt) : (record.updatedAt || new Date())
       }));
       
       return data;

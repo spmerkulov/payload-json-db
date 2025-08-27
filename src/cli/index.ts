@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import fs from 'fs-extra';
 import path from 'path';
-import { JsonAdapter } from '../adapter/JsonAdapter';
+import { JsonAdapter } from '../adapter';
 import { DEFAULT_CONFIG } from '../config/defaults';
 import { JsonAdapterConfig } from '../types';
 
@@ -141,7 +141,7 @@ async function initializeProject(dir: string, config: any) {
     const templatePath = path.join(__dirname, '../../examples', config.template);
     if (await fs.pathExists(templatePath)) {
       await fs.copy(templatePath, projectPath, {
-        filter: (src) => !src.includes('node_modules') && !src.includes('.git'),
+        filter: (_src: string) => !_src.includes('node_modules') && !_src.includes('.git'),
       });
     }
     
@@ -196,7 +196,7 @@ ${config.useEncryption ? `JSON_DB_ENCRYPTION_KEY=${generateEncryptionKey()}` : '
   }
 }
 
-async function runMigration(options: any) {
+async function runMigration(_options: any) {
   // Реализация миграции данных
   console.log(chalk.yellow('⚠️  Функция миграции будет реализована в следующих версиях'));
 }
@@ -332,7 +332,7 @@ async function showStats(options: any) {
     } else {
       console.log(chalk.blue('📊 Статистика базы данных:'));
       console.log(chalk.white(`Коллекций: ${stats.collections}`));
-      console.log(chalk.white(`Документов: ${stats.documents}`));
+      console.log(chalk.white(`Документов: ${stats.totalRecords}`));
       console.log(chalk.white(`Размер данных: ${formatBytes(stats.dataSize)}`));
       console.log(chalk.white(`Кэш попаданий: ${stats.cacheHits}`));
       console.log(chalk.white(`Кэш промахов: ${stats.cacheMisses}`));
