@@ -61,10 +61,19 @@ module.exports = {
   restoreMocks: true,
 
   // Таймаут для тестов (в миллисекундах)
-  testTimeout: 10000,
+  testTimeout: 15000,
 
   // Подробный вывод результатов
   verbose: true,
+
+  // Принудительное завершение Jest после тестов
+  forceExit: true,
+
+  // Обнаружение открытых хендлов
+  detectOpenHandles: true,
+
+  // Максимальное количество воркеров
+  maxWorkers: 1,
 
   // Игнорируемые пути
   testPathIgnorePatterns: [

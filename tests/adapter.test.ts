@@ -306,4 +306,232 @@ describe('JsonAdapter', () => {
       await expect(adapter.create('users', 'invalid' as any)).rejects.toThrow();
     });
   });
+
+  describe('New CRUD Operations', () => {
+    let testRecords: TestRecord[];
+
+    beforeEach(async () => {
+      testRecords = [
+        { id: '1', name: 'Alice', email: 'alice@example.com', age: 25 },
+        { id: '2', name: 'Bob', email: 'bob@example.com', age: 30 },
+        { id: '3', name: 'Charlie', email: 'charlie@example.com', age: 35 }
+      ];
+
+      for (const record of testRecords) {
+        await adapter.create<TestRecord>('users', record);
+      }
+    });
+
+    describe('count', () => {
+      it('should count all documents', async () => {
+        const count = await adapter.count({ collection: 'users' });
+        expect(count).toEqual({ totalDocs: 3 });
+      });
+
+      it('should count documents with where clause', async () => {
+        const count = await adapter.count({ 
+          collection: 'users', 
+          where: { age: { $gte: 30 } } 
+        });
+        expect(count).toEqual({ totalDocs: 2 }); // Bob and Charlie
+      });
+    });
+
+    describe('deleteMany', () => {
+      it('should delete multiple documents', async () => {
+        const result = await adapter.deleteMany({ 
+          collection: 'users', 
+          where: { age: { $gte: 30 } } 
+        });
+        
+        expect(result.deletedCount).toBe(2);
+        
+        const remaining = await adapter.find<TestRecord>('users');
+        expect(remaining.totalDocs).toBe(1);
+        expect(remaining.docs[0].name).toBe('Alice');
+      });
+    });
+
+    describe('deleteOne', () => {
+      it('should delete one document', async () => {
+        const result = await adapter.deleteOne({ 
+          collection: 'users', 
+          where: { name: 'Bob' } 
+        });
+        
+        expect(result.deletedCount).toBe(1);
+        
+        const remaining = await adapter.find<TestRecord>('users');
+        expect(remaining.totalDocs).toBe(2);
+      });
+    });
+
+    describe('updateOne', () => {
+      it('should update one document', async () => {
+        const result = await adapter.updateOne({ 
+          collection: 'users', 
+          where: { name: 'Bob' },
+          data: { age: 31 }
+        });
+        
+        expect(result.modifiedCount).toBe(1);
+        
+        const updated = await adapter.findOne<TestRecord>('users', { name: 'Bob' });
+        expect(updated?.age).toBe(31);
+      });
+    });
+
+    describe('upsert', () => {
+      it('should update existing document', async () => {
+        const result = await adapter.upsert({ 
+          collection: 'users', 
+          where: { name: 'Bob' },
+          data: { age: 32 }
+        });
+        
+        expect(result.name).toBe('Bob');
+        expect(result.age).toBe(32);
+      });
+
+      it('should create new document if not exists', async () => {
+        const result = await adapter.upsert({ 
+          collection: 'users', 
+          where: { name: 'David' },
+          data: { email: 'david@example.com', age: 28 }
+        });
+        
+        expect(result.name).toBe('David');
+        expect(result.email).toBe('david@example.com');
+        
+        const count = await adapter.count({ collection: 'users' });
+        expect(count).toEqual({ totalDocs: 4 });
+      });
+    });
+  });
+
+  describe('Transaction Operations', () => {
+    it('should begin, commit and rollback transactions', async () => {
+      const transactionId = await adapter.beginTransaction();
+      expect(transactionId).toBeDefined();
+      expect(typeof transactionId).toBe('string');
+
+      await adapter.commitTransaction(transactionId);
+      
+      // Test rollback
+      const transactionId2 = await adapter.beginTransaction();
+      await adapter.rollbackTransaction(transactionId2);
+    });
+
+    it('should handle invalid transaction IDs', async () => {
+      await expect(adapter.commitTransaction('invalid-id')).rejects.toThrow();
+      await expect(adapter.rollbackTransaction('invalid-id')).rejects.toThrow();
+    });
+  });
+
+  describe('Global Operations', () => {
+    it('should create and find global data', async () => {
+      const globalData = { title: 'Site Title', description: 'Site Description' };
+      
+      const created = await adapter.createGlobal({ slug: 'site-settings', data: globalData });
+      expect(created.title).toBe('Site Title');
+      
+      const found = await adapter.findGlobal({ slug: 'site-settings' });
+      expect(found.title).toBe('Site Title');
+      expect(found.description).toBe('Site Description');
+    });
+
+    it('should update global data', async () => {
+      await adapter.createGlobal({ 
+        slug: 'site-settings', 
+        data: { title: 'Old Title' } 
+      });
+      
+      const updated = await adapter.updateGlobal({ 
+        slug: 'site-settings', 
+        data: { title: 'New Title', description: 'New Description' } 
+      });
+      
+      expect(updated.title).toBe('New Title');
+      expect(updated.description).toBe('New Description');
+    });
+  });
+
+  describe('Version Operations', () => {
+    it('should create and find versions', async () => {
+      const parentDoc = await adapter.create<TestRecord>('posts', {
+        name: 'Test Post',
+        email: 'test@example.com'
+      });
+      
+      const version = await adapter.createVersion({
+        collection: 'posts',
+        parent: parentDoc.id,
+        versionData: { name: 'Test Post v1', content: 'Version 1 content' }
+      });
+      
+      expect(version.parent).toBe(parentDoc.id);
+      expect(version.name).toBe('Test Post v1');
+      
+      const versions = await adapter.findVersions({ 
+        collection: 'posts',
+        where: { parent: parentDoc.id }
+      });
+      
+      expect(versions.totalDocs).toBe(1);
+      expect(versions.docs[0].parent).toBe(parentDoc.id);
+    });
+
+    it('should delete versions', async () => {
+      const parentDoc = await adapter.create<TestRecord>('posts', {
+        name: 'Test Post',
+        email: 'test@example.com'
+      });
+      
+      await adapter.createVersion({
+        collection: 'posts',
+        parent: parentDoc.id,
+        versionData: { name: 'Version 1' }
+      });
+      
+      const result = await adapter.deleteVersions({ 
+        collection: 'posts',
+        where: { parent: parentDoc.id }
+      });
+      
+      expect(result.deletedCount).toBe(1);
+    });
+  });
+
+  describe('Migration Operations', () => {
+    it('should create migration records', async () => {
+      const migration = await adapter.createMigration({ 
+        name: '001_initial_migration',
+        batch: 1
+      });
+      
+      expect(migration.name).toBe('001_initial_migration');
+      expect(migration.batch).toBe(1);
+      expect(migration.executedAt).toBeDefined();
+    });
+
+    it('should get migration records', async () => {
+      await adapter.createMigration({ name: '001_first', batch: 1 });
+      await adapter.createMigration({ name: '002_second', batch: 1 });
+      
+      const migrations = await adapter.getMigrations();
+      expect(migrations.length).toBe(2);
+      expect(migrations[0].name).toBe('001_first');
+      expect(migrations[1].name).toBe('002_second');
+    });
+
+    it('should perform fresh migration', async () => {
+      await adapter.create<TestRecord>('users', { name: 'Test', email: 'test@example.com' });
+      
+      await adapter.migrateFresh();
+      
+      // После fresh migration данные должны быть очищены
+      const users = await adapter.find<TestRecord>('users');
+      expect(users.totalDocs).toBe(0);
+    });
+  });
 });

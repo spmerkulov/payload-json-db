@@ -23,6 +23,9 @@ export interface JsonAdapterConfig {
   /** Путь к папке с данными */
   dataDir: string;
   
+  /** Путь к папке с миграциями */
+  migrationDir?: string;
+  
   /** Настройки шифрования */
   encryption?: {
     enabled: boolean;
@@ -245,5 +248,10 @@ export enum ErrorCodes {
   ENCRYPTION_ERROR = 'ENCRYPTION_ERROR',
   CACHE_ERROR = 'CACHE_ERROR',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
-  MIGRATION_ERROR = 'MIGRATION_ERROR'
+  MIGRATION_ERROR = 'MIGRATION_ERROR',
+  CREATE_ERROR = 'CREATE_ERROR',
+  UPDATE_ERROR = 'UPDATE_ERROR',
+  DELETE_ERROR = 'DELETE_ERROR',
+  QUERY_ERROR = 'QUERY_ERROR',
+  TRANSACTION_ERROR = 'TRANSACTION_ERROR'
 }

@@ -28,6 +28,12 @@ import { DEFAULT_CONFIG } from '../index';
  * Основной класс JSON адаптера для PayloadCMS
  */
 export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
+  // Обязательные свойства BaseDatabaseAdapter
+  public name = 'payload-db-json';
+  public packageName = 'payload-db-json';
+  public defaultIDType: 'text' | 'number' = 'text';
+  public migrationDir?: string;
+  
   public config: JsonAdapterConfig;
   public fileManager: FileManager;
   public cache: MemoryCache;
@@ -40,7 +46,9 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     cacheMisses: 0
   };
 
-  private autoSaveTimer?: NodeJS.Timeout;
+  private autoSaveTimer?: NodeJS.Timeout | undefined;
+  private transactionStack: Map<string, any> = new Map();
+  private migrationCollection: string;
 
   constructor(config: JsonAdapterConfig) {
     super();
@@ -49,9 +57,16 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     this.config = { ...DEFAULT_CONFIG, ...config } as JsonAdapterConfig;
     validateConfig(this.config);
 
+    // Установка migrationDir
+    this.migrationDir = config.migrationDir || `${this.config.dataDir}/migrations`;
+
     // Инициализация компонентов
     this.fileManager = new FileManager(this.config.dataDir);
     this.cache = new MemoryCache(this.config.cache!);
+    
+    // Создание уникального имени коллекции миграций для изоляции
+    const dbPathHash = this.config.dataDir.replace(/[^a-zA-Z0-9]/g, '_');
+    this.migrationCollection = `payload_migrations_${dbPathHash}`;
     
     if (this.config.encryption?.key) {
       this.encryption = new AESEncryption(this.config.encryption.key);
@@ -107,18 +122,40 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
     try {
       // Очищаем таймер автосохранения
       if (this.autoSaveTimer) {
-          clearInterval(this.autoSaveTimer);
+        clearInterval(this.autoSaveTimer);
+        this.autoSaveTimer = undefined as NodeJS.Timeout | undefined;
+      }
+      
+      // Откатываем все активные транзакции
+      for (const [transactionId] of this.transactionStack) {
+        try {
+          await this.rollbackTransaction(transactionId);
+        } catch (rollbackError) {
+          console.warn(`Failed to rollback transaction ${transactionId}:`, rollbackError);
         }
+      }
+      
+      // Очищаем стек транзакций
+      this.transactionStack.clear();
       
       // Финальное сохранение перед уничтожением
       await this.performAutoSave();
       
       // Очистка кэша перед закрытием
       this.cache.destroy();
+      
+      // Удаляем все слушатели событий
       this.removeAllListeners();
+      
+      // Эмитируем событие уничтожения перед полной очисткой
       this.emit('adapter:destroyed');
+      
+      // Принудительная очистка всех ссылок
+      this.transactionStack = new Map();
+      
     } catch (error) {
       this.emit('error', error as Error);
+      throw error;
     }
   }
 
@@ -483,6 +520,411 @@ export class JsonAdapter extends EventEmitter implements JsonDatabaseAdapter {
         undefined,
         error instanceof Error ? error.message : String(error)
       ));
+    }
+  }
+
+  // ========== НЕДОСТАЮЩИЕ CRUD ОПЕРАЦИИ ==========
+
+  /**
+   * Подсчет документов в коллекции
+   */
+  async count({ collection, where }: { collection: string; where?: any }): Promise<{ totalDocs: number }> {
+    try {
+      const result = await this.find(collection, { where });
+      return { totalDocs: result.docs.length };
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to count documents in collection ${collection}`,
+        ErrorCodes.QUERY_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Удаление множественных документов
+   */
+  async deleteMany({ collection, where }: { collection: string; where: any }): Promise<{ deletedCount: number }> {
+    try {
+      const result = await this.find(collection, { where });
+      let deletedCount = 0;
+
+      for (const doc of result.docs) {
+        await this.findOneAndDelete(collection, doc.id);
+        deletedCount++;
+      }
+
+      return { deletedCount };
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to delete multiple documents in collection ${collection}`,
+        ErrorCodes.DELETE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Удаление одного документа
+   */
+  async deleteOne({ collection, where }: { collection: string; where: any }): Promise<{ deletedCount: number }> {
+    try {
+      const result = await this.find(collection, { where, limit: 1 });
+      if (result.docs.length > 0 && result.docs[0]?.id) {
+        await this.findOneAndDelete(collection, result.docs[0].id);
+        return { deletedCount: 1 };
+      }
+      return { deletedCount: 0 };
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to delete document in collection ${collection}`,
+        ErrorCodes.DELETE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Обновление одного документа
+   */
+  async updateOne({ collection, where, data }: { collection: string; where: any; data: any }): Promise<{ modifiedCount: number }> {
+    try {
+      const result = await this.find(collection, { where, limit: 1 });
+      if (result.docs.length > 0 && result.docs[0]?.id) {
+        const updated = await this.findOneAndUpdate(collection, result.docs[0].id, data);
+        return { modifiedCount: updated ? 1 : 0 };
+      }
+      return { modifiedCount: 0 };
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to update document in collection ${collection}`,
+        ErrorCodes.UPDATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Обновление множества документов
+   */
+  async updateMany({ collection, where, data }: { collection: string; where: any; data: any }): Promise<{ modifiedCount: number }> {
+    try {
+      const result = await this.find(collection, { where });
+      let modifiedCount = 0;
+
+      for (const doc of result.docs) {
+        const updated = await this.findOneAndUpdate(collection, doc.id, data);
+        if (updated) {
+          modifiedCount++;
+        }
+      }
+
+      return { modifiedCount };
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to update multiple documents in collection ${collection}`,
+        ErrorCodes.UPDATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Upsert операция (создание или обновление)
+   */
+  async upsert({ collection, where, data }: { collection: string; where: any; data: any }): Promise<any> {
+    try {
+      // Попытка найти существующий документ
+      const result = await this.find(collection, { where, limit: 1 });
+      
+      if (result.docs.length > 0 && result.docs[0]?.id) {
+        // Обновляем существующий
+        return await this.findOneAndUpdate(collection, result.docs[0].id, data);
+      } else {
+        // Создаем новый
+        return await this.create(collection, { ...data, ...where });
+      }
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to upsert document in collection ${collection}`,
+        ErrorCodes.UPDATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  // ========== МЕТОДЫ ТРАНЗАКЦИЙ ==========
+
+  /**
+   * Начало транзакции
+   */
+  async beginTransaction(req?: PayloadRequest): Promise<string> {
+    const transactionId = generateUUID();
+    this.transactionStack.set(transactionId, {
+      id: transactionId,
+      operations: [],
+      startTime: Date.now(),
+      req
+    });
+    
+    this.emit('transaction:begin', transactionId);
+    return transactionId;
+  }
+
+  /**
+   * Подтверждение транзакции
+   */
+  async commitTransaction(transactionId: string): Promise<void> {
+    const transaction = this.transactionStack.get(transactionId);
+    if (!transaction) {
+      throw new JsonAdapterError(
+        `Transaction ${transactionId} not found`,
+        ErrorCodes.TRANSACTION_ERROR
+      );
+    }
+
+    try {
+      // В JSON адаптере транзакции эмулируются через кэш
+      // Все операции уже выполнены, просто очищаем стек
+      this.transactionStack.delete(transactionId);
+      this.emit('transaction:commit', transactionId);
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to commit transaction ${transactionId}`,
+        ErrorCodes.TRANSACTION_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Откат транзакции
+   */
+  async rollbackTransaction(transactionId: string): Promise<void> {
+    const transaction = this.transactionStack.get(transactionId);
+    if (!transaction) {
+      throw new JsonAdapterError(
+        `Transaction ${transactionId} not found`,
+        ErrorCodes.TRANSACTION_ERROR
+      );
+    }
+
+    try {
+      // В JSON адаптере откат эмулируется через очистку кэша
+      // и перезагрузку данных из файлов
+      this.cache.clear();
+      this.transactionStack.delete(transactionId);
+      this.emit('transaction:rollback', transactionId);
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to rollback transaction ${transactionId}`,
+        ErrorCodes.TRANSACTION_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  // ========== ОПЕРАЦИИ С ГЛОБАЛЬНЫМИ ДАННЫМИ ==========
+
+  /**
+   * Создание глобального документа
+   */
+  async createGlobal({ slug, data }: { slug: string; data: any }): Promise<any> {
+    try {
+      return await this.create(`globals_${slug}`, data);
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to create global ${slug}`,
+        ErrorCodes.CREATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Поиск глобального документа
+   */
+  async findGlobal({ slug }: { slug: string }): Promise<any> {
+    try {
+      const result = await this.find(`globals_${slug}`);
+      return result.docs[0] || null;
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to find global ${slug}`,
+        ErrorCodes.QUERY_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Обновление глобального документа
+   */
+  async updateGlobal({ slug, data }: { slug: string; data: any }): Promise<any> {
+    try {
+      const existing = await this.findGlobal({ slug });
+      if (existing && existing.id) {
+        return await this.findOneAndUpdate(
+          `globals_${slug}`, 
+          existing.id, 
+          data
+        );
+      } else {
+        return await this.createGlobal({ slug, data });
+      }
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to update global ${slug}`,
+        ErrorCodes.UPDATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  // ========== ОПЕРАЦИИ С ВЕРСИЯМИ ==========
+
+  /**
+   * Создание версии документа
+   */
+  async createVersion({ collection, parent, versionData }: { collection: string; parent: string; versionData: any }): Promise<any> {
+    try {
+      const versionDoc = {
+        ...versionData,
+        parent,
+        version: Date.now(),
+        createdAt: new Date().toISOString()
+      };
+      
+      return await this.create(
+        `${collection}_versions`, 
+        versionDoc
+      );
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to create version for ${collection}`,
+        ErrorCodes.CREATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Поиск версий документа
+   */
+  async findVersions({ collection, where }: { collection: string; where?: any }): Promise<QueryResult> {
+    try {
+      return await this.find(
+        `${collection}_versions`, 
+        {
+          where,
+          sort: { version: -1 }
+        }
+      );
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to find versions for ${collection}`,
+        ErrorCodes.QUERY_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Удаление версий документа
+   */
+  async deleteVersions({ collection, where }: { collection: string; where: any }): Promise<{ deletedCount: number }> {
+    try {
+      return await this.deleteMany({
+        collection: `${collection}_versions`, 
+        where
+      });
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to delete versions for ${collection}`,
+        ErrorCodes.DELETE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  // ========== ОПЕРАЦИИ МИГРАЦИЙ ==========
+
+  /**
+   * Создание записи миграции
+   */
+  async createMigration({ name, batch }: { name: string; batch?: number }): Promise<any> {
+    try {
+      const migrationDoc = {
+        name,
+        batch: batch || 1,
+        executedAt: new Date().toISOString()
+      };
+      
+      return await this.create(
+        this.migrationCollection, 
+        migrationDoc
+      );
+    } catch (error) {
+      throw new JsonAdapterError(
+        `Failed to create migration record ${name}`,
+        ErrorCodes.CREATE_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Полная миграция (очистка и пересоздание)
+   */
+  async migrateFresh(): Promise<void> {
+    try {
+      // Очистка всех данных
+      await this.cache.clear();
+      
+      // Пересоздание структуры директорий
+      await this.fileManager.init();
+      
+      this.emit('migration:fresh');
+    } catch (error) {
+      throw new JsonAdapterError(
+        'Failed to perform fresh migration',
+        ErrorCodes.MIGRATION_ERROR,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Получение выполненных миграций
+   */
+  async getMigrations(): Promise<any[]> {
+    try {
+      const result = await this.find(
+        this.migrationCollection,
+        {
+          sort: { batch: 1, executedAt: 1 }
+        }
+      );
+      return result.docs;
+    } catch (error) {
+      // Если коллекция миграций не существует, возвращаем пустой массив
+      return [];
     }
   }
 

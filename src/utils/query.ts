@@ -176,6 +176,9 @@ export class QueryProcessor {
           if (!Array.isArray(recordValue)) return false;
           if (!recordValue.some(item => this.matchesFilter(item, operatorValue))) return false;
           break;
+        case 'equals':
+          if (!this.compareValues(recordValue, operatorValue)) return false;
+          break;
         default:
           throw new JsonAdapterError(
             `Unsupported query operator: ${operator}`,
