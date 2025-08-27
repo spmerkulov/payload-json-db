@@ -2,6 +2,8 @@ import express from 'express';
 import payload from 'payload';
 import path from 'path';
 
+require('dotenv').config();
+
 const app = express();
 
 // Инициализация Payload CMS

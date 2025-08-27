@@ -159,17 +159,17 @@ async function initializeProject(dir: string, config: any) {
         'generate:graphQLSchema': 'cross-env PAYLOAD_CONFIG_PATH=src/payload.config.ts payload generate:graphQLSchema',
       },
       dependencies: {
-        payload: '^2.0.0',
-        'payload-db-json': '^1.0.0',
-        express: '^4.18.0',
-        'cross-env': '^7.0.3',
+        payload: 'latest',
+        'payload-db-json': 'latest',
+        express: 'latest',
+        'cross-env': 'latest',
       },
       devDependencies: {
-        '@types/express': '^4.17.0',
-        '@types/node': '^20.0.0',
-        nodemon: '^3.0.0',
-        'ts-node': '^10.9.0',
-        typescript: '^5.0.0',
+        '@types/express': 'latest',
+        '@types/node': 'latest',
+        nodemon: 'latest',
+        'ts-node': 'latest',
+        typescript: 'latest',
       },
     };
     

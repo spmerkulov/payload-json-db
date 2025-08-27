@@ -15,7 +15,6 @@ export default buildConfig({
   // Настройки админ панели
   admin: {
     user: Users.slug,
-    bundler: 'webpack',
     meta: {
       titleSuffix: '- JSON Blog',
       favicon: '/favicon.ico',
@@ -29,6 +28,7 @@ export default buildConfig({
     
     // Настройки кэширования для разработки
     cache: {
+      enabled: true,
       ttl: process.env.NODE_ENV === 'production' ? 300000 : 60000, // 5 мин / 1 мин
       maxSize: 1000,
       autoSaveInterval: process.env.NODE_ENV === 'production' ? 30000 : 10000 // 30 сек / 10 сек
@@ -36,6 +36,7 @@ export default buildConfig({
     
     // Настройки производительности
     performance: {
+      enableIndexing: true,
       maxFileSize: 10 * 1024 * 1024, // 10MB
       compression: process.env.NODE_ENV === 'production'
     },
@@ -118,14 +119,14 @@ export default buildConfig({
     'http://localhost:3000',
     'http://localhost:3001',
     process.env.PAYLOAD_PUBLIC_SERVER_URL,
-  ].filter(Boolean),
-  
+  ].filter((url): url is string => Boolean(url)),
+
   // CSRF защита
   csrf: [
     'http://localhost:3000',
     'http://localhost:3001', 
     process.env.PAYLOAD_PUBLIC_SERVER_URL,
-  ].filter(Boolean),
+  ].filter((url): url is string => Boolean(url)),
   
   // Настройки загрузки файлов
   upload: {
@@ -137,15 +138,22 @@ export default buildConfig({
   // Настройки Express
   express: {
     json: {
-      limit: '2mb',
+      limit: 2097152, // 2MB в байтах
     },
-    compression: true,
+    compression: {
+      threshold: 1024,
+    },
   },
   
   // Настройки рейт-лимитинга
   rateLimit: {
     max: 2000,
     trustProxy: true,
+  },
+  
+  // Настройки фоновых задач
+  jobs: {
+    tasks: [],
   },
   
   // Настройки логирования
