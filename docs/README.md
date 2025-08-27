@@ -55,7 +55,8 @@ export default buildConfig({
 
 - Node.js >= 16.0.0
 - npm >= 7.0.0 или yarn >= 1.22.0
-- Payload CMS >= 2.0.0
+- Payload CMS >= 2.0.0 (поддерживается 3.x)
+- Next.js >= 13.0.0 (рекомендуется 15.x)
 
 ### Установка пакета
 
